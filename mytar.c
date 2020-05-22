@@ -24,8 +24,62 @@ void checkForWrongOption(int argc, char* argv[], char* supportedOptions[], int s
         if(*argv[i] == '-' && !contains(argv[i],suppOptSize,supportedOptions))
         {
             err(2,"mytar: Unknown option: %s",argv[i]);
-            exit(2);
         }
+    }
+}
+
+void checkForZeroBlock(size_t* zeroBlocks, char* buffer, int offset){
+    bool zero = true;
+    for(int i = 0; i < 512; i++)    //checking if it is zero block
+        if(buffer[offset + i] != '\0')
+            zero = false;
+    if(zero)
+        (*zeroBlocks)++;
+    else{
+        err(2,"Unexpected file format");    //no zero block, some corrupted data
+    }
+}
+
+int OctToDec(char num[]){
+    int decNum = num[10] - '0';
+    int multiplier = 8;
+    for(int i = 9; i > -1; i--){
+        decNum += (num[i] - '0') * multiplier;
+        multiplier = multiplier * 8;
+    }
+
+    return decNum;
+}   
+
+void handle_t_option(int argc, char* fileName, char *fileList[]){
+    if(argc > 4)    //if true, fileList is not empty
+    {
+        int pos;
+        if((pos = contains(fileName,argc-4,fileList)) > 0){
+            fileList[pos-1] = "";
+                printf("%s\n",fileName);
+        }
+    }
+    else
+    {
+        printf("%s\n",fileName);
+    }
+}
+
+void handleNotPresentFiles(char* fileList[], int count){
+    bool quit = false;
+    if(count > 0){
+        for(int i=0; i< count; i++){
+            if(strcmp(fileList[i],"") != 0)
+            {
+                fprintf(stderr,"mytar: %s: Not found in archive\n",fileList[i]);
+                quit = true;
+            }
+        }
+    }
+    if(quit){
+        fprintf(stderr,"mytar: Exiting with failure status due to previous errors\n");
+        exit(2);
     }
 }
 
@@ -40,7 +94,7 @@ int main(int argc, char *argv[])
     FILE* tarFile;
 
     if(argc == 1)   //called without arguments
-        exit(2);
+        err(2,"Need at least 1 option");    
     else
     {
         t_Option = contains("-t", argc, argv);  //check for -t option
@@ -66,21 +120,62 @@ int main(int argc, char *argv[])
     tarFile = fopen(fileName,"r");
     if(tarFile == NULL)
         err(2,"tar: %s: Cannot open: No such file or directory\ntar: Error is not recoverable: exiting now",fileName);
-    
+    if(tarFile != NULL)
+    {
+        fseek(tarFile,0L,SEEK_END);
+        size_t size = ftell(tarFile);
+        fseek(tarFile,0L,SEEK_SET);
+        char buffer[size];
+        fread(buffer,1,size,tarFile);
 
-    
-    
-    char buf[2048];
-    FILE *file3;
-    size_t nread;
-    size_t sz = sizeof buf;
-    char s[] = "0123456789";
-    file3 = fopen("arch.tar", "r");
-    fread(buf,1536,1,file3);
-    char sk[1200];
-    for(int i = 1000; i < 2048; i++)
-        sk[i - 1000] = buf[i];
-    fclose(file3);
+        bool end = buffer[0] == '\0';
+        size_t zeroBlocks = 0;
+        size_t offset = 0;
+        while (!end){
+            if(zeroBlocks == 2)
+            {
+                handleNotPresentFiles(fileList,argc-4);
+                exit(0);
+            }
+            //missing 1 zero block
+            if((offset == size) && (zeroBlocks == 1)){
+                err(0,"mytar: A lone zero block");
+            }
+            //missing both zero blocks
+            else if(offset == size)
+                exit(0);
 
-    
+            char fileName[100];
+            char fileSize[12];
+            char fileType;
+
+            strncpy(fileName,buffer+offset,100);
+            strncpy(fileSize,buffer+offset+124,12);
+            fileType = buffer[offset+156];
+
+            if(fileName[0] == '\0')
+            {
+                checkForZeroBlock(&zeroBlocks,buffer,offset);
+                offset += 512;
+            }
+            else{
+                //get size of file in dec
+                int filesize = OctToDec(fileSize);
+                //get size of file with padding to 512B
+                filesize = (filesize % 512 == 0) ? filesize : (filesize + (512 - (filesize % 512)));
+
+                //check for truncated tar archive
+                if(offset + 512 + filesize > size)
+                    err(2,"%s\nmytar: Unexpected EOF in archive\nmytar: Error is not recoverable: exiting now",fileName);
+                //check if file is regular
+                if(fileType != '0')
+                    err(2,"Unsupported header type");
+
+                if(t_Option){
+                    handle_t_option(argc,fileName,fileList);
+                }
+                offset += 512 + filesize;
+            }
+        }
+    }
 }

@@ -10,7 +10,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/main",
-            "args": ["-t", "-f", "arch.tar", "fl1"],
+            "args": ["-t" ,"-f", "arch.tar", "non1", "fl1", "non2", "fl3", "fl7", "fl10", "non3"],
             "cwd": "${workspaceRoot}/",
         }
     ]
