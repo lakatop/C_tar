@@ -18,6 +18,7 @@ char* getFileName(int argc, char* argv[]){
     return argv[position];
 }
 
+//exit with return value 2 if there is some unrecognized option
 void checkForWrongOption(int argc, char* argv[], char* supportedOptions[], int suppOptSize)
 {
     for(int i = 1; i < argc; i++){
@@ -57,7 +58,7 @@ void handle_t_option(int argc, char* fileName, char *fileList[]){
         int pos;
         if((pos = contains(fileName,argc-4,fileList)) > 0){
             fileList[pos-1] = "";
-                printf("%s\n",fileName);
+            printf("%s\n",fileName);
         }
     }
     else
@@ -85,6 +86,7 @@ void handleNotPresentFiles(char* fileList[], int count){
 
 int main(int argc, char *argv[])
 {
+    setbuf(stdout, NULL);
     bool t_Option;   
     bool f_Option;
     char* fileName;
@@ -122,9 +124,12 @@ int main(int argc, char *argv[])
         err(2,"tar: %s: Cannot open: No such file or directory\ntar: Error is not recoverable: exiting now",fileName);
     if(tarFile != NULL)
     {
+        //get size of tar archive
         fseek(tarFile,0L,SEEK_END);
         size_t size = ftell(tarFile);
         fseek(tarFile,0L,SEEK_SET);
+
+        //create buffer and copy tar archive data in it
         char buffer[size];
         fread(buffer,1,size,tarFile);
 
@@ -139,7 +144,8 @@ int main(int argc, char *argv[])
             }
             //missing 1 zero block
             if((offset == size) && (zeroBlocks == 1)){
-                err(0,"mytar: A lone zero block");
+                fprintf(stderr,"mytar: A lone zero block at %zu",offset/512);
+                exit(0);
             }
             //missing both zero blocks
             else if(offset == size)
@@ -166,10 +172,17 @@ int main(int argc, char *argv[])
 
                 //check for truncated tar archive
                 if(offset + 512 + filesize > size)
-                    err(2,"%s\nmytar: Unexpected EOF in archive\nmytar: Error is not recoverable: exiting now",fileName);
+                {
+                    printf("%s\n",fileName);
+                    fprintf(stderr,"mytar: Unexpected EOF in archive\nmytar: Error is not recoverable: exiting now");
+                    exit(2);
+                }
                 //check if file is regular
                 if(fileType != '0')
-                    err(2,"Unsupported header type");
+                {
+                    fprintf(stderr,"mytar: Unsupported header type: %d",fileType);
+                    exit(2);
+                }
 
                 if(t_Option){
                     handle_t_option(argc,fileName,fileList);
