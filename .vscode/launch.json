@@ -10,7 +10,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/main",
-            "args": ["-x","-v","-f", "archive3.tar","c1.txt"],
+            "args": ["-x","-v","-f", "out.tar"],
             "cwd": "${workspaceRoot}/",
         }
     ]

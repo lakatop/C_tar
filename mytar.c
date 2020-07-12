@@ -85,21 +85,36 @@ void handleNotPresentFiles(char* fileList[], int count){
     }
 }
 
-void createFile(FILE* tarFile, char *fileName, int fileSize){
-    //create new file with given name
-    FILE* newFile = fopen(fileName,"w");
-    //buffer to store file data
-    char buff[fileSize + 1];
-    if(newFile == NULL)
-        exit(2);
-    //read data and store them into the buffer
-    if(fileSize >= 0 && fread(buff,1,fileSize,tarFile) != (size_t)fileSize)
-        exit(2);
-    buff[fileSize] = '\0';
-    //write data into the new file
-    if(fwrite(buff,1,fileSize,newFile) != (size_t)fileSize)
-        exit(2);
-    fclose(newFile);
+void createFile(FILE* tarFile, char *fileName, int fileSize, char fileType){
+    if(fileType == '0' || fileType == '\0'){
+        //create new file with given name
+        FILE* newFile = fopen(fileName,"w");
+        //if file is too big, then copy it byte by byte
+        if(fileSize > 500000){
+            //buffer to store file data
+            char buff[2];
+            for(int i=0; i<fileSize; i++){
+                if(!fread(buff,1,1,tarFile))
+                    exit(2);
+                buff[2] = '\0';
+                if(!fwrite(buff,1,1,newFile))
+                    exit(2);
+            }
+        }
+        else{
+            char buff[fileSize + 1];
+            if(newFile == NULL)
+                exit(2);
+            //read data and store them into the buffer
+            if(fileSize >= 0 && fread(buff,1,fileSize,tarFile) != (size_t)fileSize)
+                exit(2);
+            buff[fileSize] = '\0';
+            //write data into the new file
+            if(fwrite(buff,1,fileSize,newFile) != (size_t)fileSize)
+                exit(2);
+            fclose(newFile);
+        }
+    }
 }
 
 void processFile(char* fileName, char **fileList, char **fileList2, bool t_Option, bool x_Option, bool v_Option, int filesCount){
@@ -110,12 +125,12 @@ void processFile(char* fileName, char **fileList, char **fileList2, bool t_Optio
         err(2,"tar: %s: Cannot open: No such file or directory\ntar: Error is not recoverable: exiting now",fileName);
 
     //get size of tar archive
-    if(fseek(tarFile,0L,SEEK_END))
+    if(fseek(tarFile,0LL,SEEK_END))
         exit(2);
     size_t size = ftell(tarFile);
     if((int)size == -1)
         exit(2);
-    if(fseek(tarFile,0L,SEEK_SET))
+    if(fseek(tarFile,0LL,SEEK_SET))
         exit(2);
 
     //create buffer and copy tar archive header in it
@@ -182,7 +197,7 @@ void processFile(char* fileName, char **fileList, char **fileList2, bool t_Optio
                 if((filesCount == 0 && x_Option) || (v_Option && x_Option && contains(fileName,filesCount,fileList2))){
                 //get the real size of truncated file
                 int newSize = size - (offset + 512);
-                createFile(tarFile,fileName,newSize);
+                createFile(tarFile,fileName,newSize,fileType);
                 }
                 if(v_Option || t_Option)
                     printf("%s\n",fileName);
@@ -191,9 +206,29 @@ void processFile(char* fileName, char **fileList, char **fileList2, bool t_Optio
             }
 
             //check if file is regular
-            if(fileType != '0'){
-                fprintf(stderr,"mytar: Unsupported header type: %d",fileType);
-                exit(2);
+            if(fileType != '0' && fileType != '\0'){
+                if(fileType == '5'){
+                    char buff[512];
+                    //read next chunk
+                    if(fread(buff,1,512,tarFile) != 512)
+                        exit(2);
+                    char nextName[100];
+                    strncpy(nextName,buff,sizeof(nextName));
+                    //if fileName is prefix of nextName and fileName is directory, then fileName directory contains nextName file
+                    for(size_t i =0; i < strlen(fileName); i++){
+                        if(fileName[i] != nextName[i]){
+                            fprintf(stderr,"mytar: Unsupported header type: %d",fileType);
+                            exit(2);
+                        }
+                    }
+                    //set reading pointer back where it was
+                    if(fseek(tarFile,offset + 512,SEEK_SET))
+                        exit(2);
+                }
+                else{
+                    fprintf(stderr,"mytar: Unsupported header type: %d",fileType);
+                    exit(2);
+                }
             }
 
             if((t_Option && !x_Option) || (v_Option && x_Option)){
@@ -203,17 +238,17 @@ void processFile(char* fileName, char **fileList, char **fileList2, bool t_Optio
             if(!x_Option){
                 offset += 512 + filesize;
                 if(fseek(tarFile,filesize,SEEK_CUR))
-                    exit(0);
+                    exit(2);
                 fread(buffer,1,512,tarFile);
             }
             else{
                 if(filesCount == 0 || (v_Option && contains(fileName,filesCount,fileList2))){
-                createFile(tarFile,fileName,realFileSize);
+                createFile(tarFile,fileName,realFileSize,fileType);
                 }
 
                 offset += 512 + filesize;
                 if(fseek(tarFile,offset,SEEK_SET))
-                    exit(0);
+                    exit(2);
                 fread(buffer,1,512,tarFile);
             }
         }
