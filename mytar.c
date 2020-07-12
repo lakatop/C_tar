@@ -53,11 +53,11 @@ int OctToDec(char num[]){
     return decNum;
 }   
 
-void handle_t_option(int argc, char* fileName, char *fileList[], int filesCount){
+void handle_t_option(char* fileName, char *fileList[], int filesCount){
     if(filesCount)    //if true, fileList is not empty
     {
         int pos;
-        if((pos = contains(fileName,argc-4,fileList)) > 0){
+        if((pos = contains(fileName,filesCount,fileList)) > 0){
             fileList[pos-1] = "";
             printf("%s\n",fileName);
         }
@@ -85,7 +85,24 @@ void handleNotPresentFiles(char* fileList[], int count){
     }
 }
 
-void processFile(char* fileName, char **fileList, int argc, bool t_Option, bool x_Option, bool v_Option, int filesCount){
+void createFile(FILE* tarFile, char *fileName, int fileSize){
+    //create new file with given name
+    FILE* newFile = fopen(fileName,"w");
+    //buffer to store file data
+    char buff[fileSize + 1];
+    if(newFile == NULL)
+        exit(2);
+    //read data and store them into the buffer
+    if(fileSize >= 0 && fread(buff,1,fileSize,tarFile) != (size_t)fileSize)
+        exit(2);
+    buff[fileSize] = '\0';
+    //write data into the new file
+    if(fwrite(buff,1,fileSize,newFile) != (size_t)fileSize)
+        exit(2);
+    fclose(newFile);
+}
+
+void processFile(char* fileName, char **fileList, char **fileList2, bool t_Option, bool x_Option, bool v_Option, int filesCount){
     FILE* tarFile;
 
     tarFile = fopen(fileName,"r");
@@ -101,7 +118,7 @@ void processFile(char* fileName, char **fileList, int argc, bool t_Option, bool 
     if(fseek(tarFile,0L,SEEK_SET))
         exit(2);
 
-    //create buffer and copy tar archive data in it
+    //create buffer and copy tar archive header in it
     char buffer[512];
     int read = fread(buffer,1,512,tarFile);
     if(read != 512)
@@ -161,31 +178,12 @@ void processFile(char* fileName, char **fileList, int argc, bool t_Option, bool 
             }
 
             //check for truncated tar archive
-            if(offset + 512 + filesize > size)
-            {
-                FILE* newFile = fopen(fileName,"w");
-                char buff[513] = {'\0'};
-                if(newFile == NULL)
-                    exit(2);   
-                for(int i = 0; i < realFileSize/512; i+=512)
-                {
-                    read = fread(buff,1,512,tarFile);
-                    if(read != 512)
-                        exit(2);
-                    read = fprintf(newFile,"%s",buff);
-                    if(read < 0)
-                        exit(2);
+            if(offset + 512 + filesize > size){
+                if((filesCount == 0 && x_Option) || (v_Option && x_Option && contains(fileName,filesCount,fileList2))){
+                //get the real size of truncated file
+                int newSize = size - (offset + 512);
+                createFile(tarFile,fileName,newSize);
                 }
-                if(realFileSize != filesize){
-                    read = fread(buff,1,realFileSize%512,tarFile);
-                    if(read != realFileSize%512)
-                        exit(2);
-                    read = fprintf(newFile,"%s",buff);
-                    if(read < 0)
-                        exit(2);
-                }
-                fclose(newFile);
-
                 if(v_Option || t_Option)
                     printf("%s\n",fileName);
                 fprintf(stderr,"mytar: Unexpected EOF in archive\nmytar: Error is not recoverable: exiting now");
@@ -193,46 +191,74 @@ void processFile(char* fileName, char **fileList, int argc, bool t_Option, bool 
             }
 
             //check if file is regular
-            if(fileType != '0')
-            {
+            if(fileType != '0'){
                 fprintf(stderr,"mytar: Unsupported header type: %d",fileType);
                 exit(2);
             }
 
             if((t_Option && !x_Option) || (v_Option && x_Option)){
-                handle_t_option(argc,fileName,fileList, filesCount);
+                handle_t_option(fileName,fileList, filesCount);
             }
 
             if(!x_Option){
-            offset += 512 + filesize;
-
-            if(fseek(tarFile,filesize,SEEK_CUR))
-                exit(0);
-
-            read = fread(buffer,1,512,tarFile);
+                offset += 512 + filesize;
+                if(fseek(tarFile,filesize,SEEK_CUR))
+                    exit(0);
+                fread(buffer,1,512,tarFile);
             }
             else{
-                FILE* newFile = fopen(fileName,"w");
-                char buff[513] = {'\0'};
-                if(newFile == NULL)
-                    exit(2);
-                for(int i=0; i < filesize; i+=512){
-                    read = fread(buff,1,512,tarFile);
-                    if(read != 512)
-                        exit(2);
-                    read = fprintf(newFile,"%s",buff);
-                    if(read < 0)
-                        exit(2);
+                if(filesCount == 0 || (v_Option && contains(fileName,filesCount,fileList2))){
+                createFile(tarFile,fileName,realFileSize);
                 }
-                fclose(newFile);
 
                 offset += 512 + filesize;
+                if(fseek(tarFile,offset,SEEK_SET))
+                    exit(0);
                 read = fread(buffer,1,512,tarFile);
             }
         }
     }
 
     fclose(tarFile);
+}
+
+void handleArguments(char **fileName, int argc, char **argv, bool *t_Option, bool *f_Option, bool *v_Option, bool *x_Option,
+    char **fileList, char **fileList2, int *filesCount, char **supportedOptions, int suppOptSize){
+    
+    if(argc == 1)   //called without arguments
+        err(2,"Need at least 1 option");    
+    else
+    {
+        *t_Option = contains("-t", argc, argv);  //check for -t option
+        *f_Option = contains("-f", argc, argv);  //check for -f option
+        *v_Option = contains("-v", argc, argv);  //check for -v option
+        *x_Option = contains("-x", argc, argv);  //check for -x option
+
+        if(*f_Option)    //if -f option is in argv, get fileName
+            *fileName = getFileName(argc, argv);
+        else{
+            *fileName = getenv("TAPE");
+            if(*fileName == NULL)
+                *fileName = "/dev/tu00";
+        }
+    
+        if(*t_Option || *v_Option)    //if -t option is in argv, get list of files
+        {
+            int start = contains(*fileName,argc,argv);
+            for(int i = start; i < argc; i++)
+            {
+                fileList[i-start] = argv[i];
+                //first fileList points right to argv, but since i will most likely "delete" some of the arguments using "contains()",
+                //i need to allocate memory for fileList2 and copy each argv argument
+                fileList2[i-start] = malloc(strlen(argv[i])+1);
+                strncpy(fileList2[i - start], argv[i], strlen(argv[i])+1);
+                (*filesCount)++;
+            }
+        }
+        
+        //check for wrong option in argv
+        checkForWrongOption(argc, argv, supportedOptions, suppOptSize);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -244,43 +270,14 @@ int main(int argc, char *argv[])
     bool x_Option;
     char* fileName;
     char *fileList[argc];
+    char *fileList2[argc];
     int filesCount = 0;
     char* supportedOptions[] = {"-t", 
                                 "-f",
                                 "-x",
                                 "-v",};
 
-    if(argc == 1)   //called without arguments
-        err(2,"Need at least 1 option");    
-    else
-    {
-        t_Option = contains("-t", argc, argv);  //check for -t option
-        f_Option = contains("-f", argc, argv);  //check for -f option
-        v_Option = contains("-v", argc, argv);
-        x_Option = contains("-x", argc, argv);
-
-        if(f_Option)    //if -f option is in argv, get fileName
-            fileName = getFileName(argc, argv);
-        else{
-            fileName = getenv("TAPE");
-            if(fileName == NULL)
-                fileName = "/dev/tu00";
-        }
-    
-        if(t_Option || v_Option)    //if -t option is in argv, get list of files
-        {
-            int start = contains(fileName,argc,argv);
-            for(int i = start; i < argc; i++)
-            {
-                fileList[i-start] = argv[i];
-                filesCount++;
-            }
-        }
-        
-        //check for wrong option in argv
-        int suppOptSize = sizeof(supportedOptions)/sizeof(*supportedOptions);
-        checkForWrongOption(argc, argv, supportedOptions, suppOptSize);
-    }
-
-    processFile(fileName,fileList,argc,t_Option,x_Option,v_Option, filesCount);
+    int suppOptSize = sizeof(supportedOptions)/sizeof(*supportedOptions);
+    handleArguments(&fileName,argc,argv,&t_Option,&f_Option,&v_Option,&x_Option,fileList,fileList2,&filesCount,supportedOptions,suppOptSize);
+    processFile(fileName,fileList,fileList2,t_Option,x_Option,v_Option, filesCount);
 }
