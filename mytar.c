@@ -214,7 +214,7 @@ void processFile(char* fileName, char **fileList, char **fileList2, bool t_Optio
                 offset += 512 + filesize;
                 if(fseek(tarFile,offset,SEEK_SET))
                     exit(0);
-                read = fread(buffer,1,512,tarFile);
+                fread(buffer,1,512,tarFile);
             }
         }
     }
